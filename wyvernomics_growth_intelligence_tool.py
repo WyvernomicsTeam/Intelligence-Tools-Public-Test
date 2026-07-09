@@ -875,12 +875,14 @@ def main():
                     if st.button("📊 Analyze this project (valuation + hiring)", type="primary"):
                         st.session_state.current_project = selected["id"]
                         st.session_state.current_project_name = selected["name"]
-                        st.info("👉 Switch to **Analyze & Platform Fit** tab")
+                        st.session_state.requested_tab = "analyze"
+                        st.rerun()
                 with col2:
                     if st.button("📈 Demo this project in Growth Intelligence Platform", type="secondary"):
                         st.session_state.current_project = selected["id"]
                         st.session_state.current_project_name = selected["name"]
-                        st.info("👉 Switch to **Growth Intelligence Platform** tab — the project context is loaded!")
+                        st.session_state.requested_tab = "growth_intel"
+                        st.rerun()
         
         st.divider()
         st.markdown("**Pro tip:** Very early projects (pre-TGE) often won't appear on CoinGecko. Use the **Growth Intelligence Platform** tab + X research links for those, or add them manually in Pitch Builder.")
@@ -890,6 +892,12 @@ def main():
         st.markdown("## 📈 Wyvernomics Web3 Growth Intelligence Platform")
         st.markdown('<span class="platform-badge">PROPRIETARY • SEA/APAC FOCUSED • DEMO MODE</span>', unsafe_allow_html=True)
         st.caption("This is the exact platform your team discussed — now built as an interactive demo you can show prospects live. Subscription model ready.")
+        
+        # Show redirect banner if user came from Discover tab
+        if st.session_state.get("requested_tab") == "growth_intel":
+            st.success("✅ Project loaded from Discover tab. You can now demo real CoinGecko data + Dune/Nansen intelligence for this project.")
+            # Clear the flag after showing once
+            st.session_state.requested_tab = None
         
         # Context from selected project + real CoinGecko data
         current_name = st.session_state.get("current_project_name", "a selected project")
@@ -1252,6 +1260,11 @@ def main():
     # ========== TAB 3: ANALYZE & PLATFORM FIT (Updated) ==========
     with tabs[2]:
         st.markdown("## 🔬 Project Analyzer & Platform Fit Assessment")
+        
+        # Show redirect banner if user came from Discover tab
+        if st.session_state.get("requested_tab") == "analyze":
+            st.success("✅ Project loaded from Discover tab. Valuation, hiring signals, and platform fit recommendation are ready below.")
+            st.session_state.requested_tab = None
         
         coin_id_input = st.text_input(
             "CoinGecko Project ID (or from Discover tab)",
