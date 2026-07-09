@@ -13,7 +13,6 @@ A Streamlit dashboard for:
 """
 
 import streamlit as st
-from coingecko_sdk import Coingecko, APIError
 import pandas as pd
 from datetime import datetime, timedelta
 import json
@@ -47,12 +46,6 @@ st.markdown("""
     .platform-badge { background-color: #1e3a8a; color: #bfdbfe; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
-
-@st.cache_resource
-def get_cg_client() -> Coingecko:
-    return Coingecko()
-
-client = get_cg_client()
 
 PROSPECTS_FILE = "wyvernomics_prospects.json"
 
@@ -291,28 +284,31 @@ def generate_research_links(project_name: str, twitter_handle: Optional[str] = N
     return links
 
 
-# ------------------ DATA FETCH FUNCTIONS (from original, required for CoinGecko integration) ------------------
+# ------------------ COINGECKO DATA FETCH (Direct REST API - more reliable on Streamlit Cloud) ------------------
+COINGECKO_BASE = "https://api.coingecko.com/api/v3"
+
 @st.cache_data(ttl=300, show_spinner="Fetching trending projects...")
 def fetch_trending_coins() -> List[Dict]:
     try:
-        resp = client.search.trending.get(show_max="coins")
+        url = f"{COINGECKO_BASE}/search/trending"
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
         coins = []
-        for item in resp.coins:
-            c = item.item
+        for item in data.get("coins", []):
+            c = item.get("item", {})
             coins.append({
-                "id": c.id,
-                "name": c.name,
-                "symbol": c.symbol.upper(),
-                "market_cap_rank": getattr(c, "market_cap_rank", None),
-                "thumb": getattr(c, "thumb", None),
-                "score": getattr(c, "score", 0)
+                "id": c.get("id"),
+                "name": c.get("name"),
+                "symbol": c.get("symbol", "").upper(),
+                "market_cap_rank": c.get("market_cap_rank"),
+                "thumb": c.get("thumb"),
+                "score": c.get("score", 0)
             })
         return coins
-    except APIError as e:
-        st.error(f"CoinGecko API error (trending): {e}")
-        return []
     except Exception as e:
-        st.error(f"Unexpected error fetching trending: {e}")
+        st.error(f"Failed to fetch trending coins from CoinGecko: {e}")
         return []
 
 @st.cache_data(ttl=300, show_spinner="Searching CoinGecko...")
@@ -320,22 +316,24 @@ def search_coins(query: str) -> List[Dict]:
     if not query or len(query) < 2:
         return []
     try:
-        resp = client.search.get(q=query)
+        url = f"{COINGECKO_BASE}/search"
+        params = {"query": query}
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
         results = []
-        for coin in resp.coins:
+        for coin in data.get("coins", []):
             results.append({
-                "id": coin.id,
-                "name": coin.name,
-                "symbol": coin.symbol.upper(),
-                "market_cap_rank": getattr(coin, "market_cap_rank", None),
-                "thumb": getattr(coin, "thumb", None)
+                "id": coin.get("id"),
+                "name": coin.get("name"),
+                "symbol": coin.get("symbol", "").upper(),
+                "market_cap_rank": coin.get("market_cap_rank"),
+                "thumb": coin.get("thumb")
             })
         return results[:25]
-    except APIError as e:
-        st.error(f"CoinGecko search error: {e}")
-        return []
     except Exception as e:
-        st.error(f"Search error: {e}")
+        st.error(f"CoinGecko search failed: {e}. Please try again in a moment (rate limits).")
         return []
 
 @st.cache_data(ttl=600, show_spinner="Loading project details from CoinGecko...")
@@ -343,60 +341,67 @@ def fetch_coin_details(coin_id: str) -> Optional[Dict]:
     if not coin_id:
         return None
     try:
-        coin = client.coins.get_id.get(
-            id=coin_id,
-            localization=False,
-            tickers=False,
-            market_data=True,
-            community_data=True,
-            developer_data=True,
-            sparkline=False
-        )
+        url = f"{COINGECKO_BASE}/coins/{coin_id}"
+        params = {
+            "localization": "false",
+            "tickers": "false",
+            "market_data": "true",
+            "community_data": "true",
+            "developer_data": "true",
+            "sparkline": "false"
+        }
+        response = requests.get(url, params=params, timeout=20)
+        response.raise_for_status()
+        coin = response.json()
+
         data = {
-            "id": coin.id,
-            "symbol": coin.symbol,
-            "name": coin.name,
-            "image": {"thumb": coin.image.thumb if coin.image else None, "small": coin.image.small if coin.image else None},
-            "description": coin.description.en if coin.description and hasattr(coin.description, 'en') else "No description available.",
-            "categories": [cat.name for cat in coin.categories] if coin.categories else [],
+            "id": coin.get("id"),
+            "symbol": coin.get("symbol"),
+            "name": coin.get("name"),
+            "image": {
+                "thumb": coin.get("image", {}).get("thumb"),
+                "small": coin.get("image", {}).get("small")
+            },
+            "description": coin.get("description", {}).get("en", "No description available."),
+            "categories": [cat.get("name") for cat in coin.get("categories", []) if isinstance(cat, dict)],
             "links": {
-                "homepage": coin.links.homepage[0] if coin.links and coin.links.homepage else None,
-                "whitepaper": coin.links.whitepaper if coin.links else None,
-                "twitter_screen_name": coin.links.twitter_screen_name if coin.links else None,
-                "telegram_channel_identifier": coin.links.telegram_channel_identifier if coin.links else None,
-                "subreddit": coin.links.subreddit if coin.links else None,
-                "github": coin.links.repos_url.github[0] if coin.links and coin.links.repos_url and coin.links.repos_url.github else None,
+                "homepage": coin.get("links", {}).get("homepage", [None])[0],
+                "whitepaper": coin.get("links", {}).get("whitepaper"),
+                "twitter_screen_name": coin.get("links", {}).get("twitter_screen_name"),
+                "telegram_channel_identifier": coin.get("links", {}).get("telegram_channel_identifier"),
+                "subreddit": coin.get("links", {}).get("subreddit"),
+                "github": (coin.get("links", {}).get("repos_url", {}) or {}).get("github", [None])[0],
             },
             "market_data": {
-                "current_price_usd": coin.market_data.current_price.usd if coin.market_data and coin.market_data.current_price else None,
-                "market_cap_usd": coin.market_data.market_cap.usd if coin.market_data and coin.market_data.market_cap else None,
-                "fully_diluted_valuation_usd": coin.market_data.fully_diluted_valuation.usd if coin.market_data and coin.market_data.fully_diluted_valuation else None,
-                "total_volume_usd": coin.market_data.total_volume.usd if coin.market_data and coin.market_data.total_volume else None,
-                "price_change_24h": coin.market_data.price_change_percentage_24h if coin.market_data else None,
-                "ath_usd": coin.market_data.ath.usd if coin.market_data and coin.market_data.ath else None,
+                "current_price_usd": coin.get("market_data", {}).get("current_price", {}).get("usd"),
+                "market_cap_usd": coin.get("market_data", {}).get("market_cap", {}).get("usd"),
+                "fully_diluted_valuation_usd": coin.get("market_data", {}).get("fully_diluted_valuation", {}).get("usd"),
+                "total_volume_usd": coin.get("market_data", {}).get("total_volume", {}).get("usd"),
+                "price_change_24h": coin.get("market_data", {}).get("price_change_percentage_24h"),
+                "ath_usd": coin.get("market_data", {}).get("ath", {}).get("usd"),
             },
             "community_data": {
-                "twitter_followers": getattr(coin.community_data, "twitter_followers", None) if coin.community_data else None,
-                "telegram_channel_user_count": getattr(coin.community_data, "telegram_channel_user_count", None) if coin.community_data else None,
+                "twitter_followers": coin.get("community_data", {}).get("twitter_followers"),
+                "telegram_channel_user_count": coin.get("community_data", {}).get("telegram_channel_user_count"),
             },
             "developer_data": {
-                "forks": getattr(coin.developer_data, "forks", None) if coin.developer_data else None,
-                "stars": getattr(coin.developer_data, "stars", None) if coin.developer_data else None,
-                "subscribers": getattr(coin.developer_data, "subscribers", None) if coin.developer_data else None,
-                "total_issues": getattr(coin.developer_data, "total_issues", None) if coin.developer_data else None,
+                "forks": coin.get("developer_data", {}).get("forks"),
+                "stars": coin.get("developer_data", {}).get("stars"),
+                "subscribers": coin.get("developer_data", {}).get("subscribers"),
+                "total_issues": coin.get("developer_data", {}).get("total_issues"),
             },
-            "last_updated": coin.last_updated.isoformat() if coin.last_updated else None,
-            "genesis_date": coin.genesis_date,
+            "last_updated": coin.get("last_updated"),
+            "genesis_date": coin.get("genesis_date"),
         }
         return data
-    except APIError as e:
-        if "404" in str(e) or "not found" in str(e).lower():
-            st.warning(f"Project '{coin_id}' not found on CoinGecko. It may be very early-stage (pre-TGE) or not yet tracked.")
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            st.warning(f"Project '{coin_id}' not found on CoinGecko. It may be very early-stage (pre-TGE).")
         else:
-            st.error(f"CoinGecko detail error: {e}")
+            st.error(f"CoinGecko API error: {e}. Try again later (rate limit).")
         return None
     except Exception as e:
-        st.error(f"Failed to fetch details: {e}")
+        st.error(f"Failed to fetch project details: {e}")
         return None
 
 @st.cache_data(ttl=300)
