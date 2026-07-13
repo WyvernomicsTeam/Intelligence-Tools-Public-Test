@@ -365,12 +365,12 @@ def fetch_coin_details(coin_id: str) -> Optional[Dict]:
             "description": coin.get("description", {}).get("en", "No description available."),
             "categories": [cat.get("name") for cat in coin.get("categories", []) if isinstance(cat, dict)],
             "links": {
-                "homepage": coin.get("links", {}).get("homepage", [None])[0],
+                "homepage": (coin.get("links", {}).get("homepage") or [None])[0],
                 "whitepaper": coin.get("links", {}).get("whitepaper"),
                 "twitter_screen_name": coin.get("links", {}).get("twitter_screen_name"),
                 "telegram_channel_identifier": coin.get("links", {}).get("telegram_channel_identifier"),
                 "subreddit": coin.get("links", {}).get("subreddit"),
-                "github": (coin.get("links", {}).get("repos_url", {}) or {}).get("github", [None])[0],
+                "github": ((coin.get("links", {}).get("repos_url", {}) or {}).get("github") or [None])[0],
             },
             "market_data": {
                 "current_price_usd": coin.get("market_data", {}).get("current_price", {}).get("usd"),
@@ -833,7 +833,7 @@ def main():
         col_search, col_trending = st.columns([3, 2])
         
         with col_search:
-            search_q = st.text_input("Search CoinGecko by name / keyword", placeholder="e.g. Saakuru, AI agent, new L2, gaming, RWA", key="search_q")
+            search_q = st.text_input("Search CoinGecko by name, ticker or keyword", placeholder="e.g. Hyperliquid, HYPE, Monad, AI agent, gaming", key="search_q")
             if st.button("Search Projects", type="primary", key="btn_search"):
                 if search_q:
                     with st.spinner("Searching..."):
@@ -869,6 +869,18 @@ def main():
                     selected = results_to_show[0]
                 
                 st.success(f"Selected: **{selected['name']}** (CoinGecko ID: `{selected['id']}`)")
+                
+                # Compact preview to reduce blockiness and give quick info
+                preview_col1, preview_col2, preview_col3 = st.columns(3)
+                with preview_col1:
+                    st.metric("Ticker", selected.get("symbol", "N/A"))
+                with preview_col2:
+                    rank = selected.get("market_cap_rank")
+                    st.metric("MC Rank", f"#{rank}" if rank else "N/A")
+                with preview_col3:
+                    st.metric("ID (slug)", selected.get("id", "N/A"))
+                
+                st.caption("Click a button below to load this project into the desired tab with full data.")
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -1269,8 +1281,8 @@ def main():
         coin_id_input = st.text_input(
             "CoinGecko Project ID (or from Discover tab)",
             value=st.session_state.get("current_project", ""),
-            placeholder="e.g. bitcoin, ethereum, saakuru-protocol, or any new project",
-            help="Find exact ID from CoinGecko URL or Discover tab"
+            placeholder="e.g. hyperliquid, HYPE, Monad, or project name/ticker",
+            help="Enter CoinGecko ID, token ticker, or project name — we'll auto-search if needed"
         )
         
         if st.button("Load / Refresh Project Data", type="primary"):
@@ -1286,8 +1298,19 @@ def main():
         details = fetch_coin_details(coin_id)
         
         if not details:
-            st.warning("Could not load project. Check ID or try again (rate limits possible).")
-            st.stop()
+            # Seamless fallback: try searching by name/ticker if direct ID failed
+            search_res = search_coins(coin_id)
+            if search_res:
+                best_match = search_res[0]
+                st.info(f"🔍 No exact CoinGecko ID match for '{coin_id}'. Searching instead and loading best result: **{best_match['name']}** ({best_match.get('symbol', '')}) — ID: `{best_match['id']}`")
+                coin_id = best_match["id"]
+                details = fetch_coin_details(coin_id)
+                if details:
+                    st.session_state.current_project = coin_id
+                    st.session_state.current_project_name = details.get("name")
+            if not details:
+                st.warning("Could not load project. Check ID or try again (rate limits possible). Try searching in the Discover tab first for best results.")
+                st.stop()
         
         if not st.session_state.get("current_project_name"):
             st.session_state.current_project_name = details["name"]
