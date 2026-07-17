@@ -870,7 +870,7 @@ def main():
                 
                 st.success(f"Selected: **{selected['name']}** (CoinGecko ID: `{selected['id']}`)")
                 
-                # Compact preview to reduce blockiness and give quick info
+                # Compact preview + inline summaries to make workflow seamless and less blocky
                 preview_col1, preview_col2, preview_col3 = st.columns(3)
                 with preview_col1:
                     st.metric("Ticker", selected.get("symbol", "N/A"))
@@ -880,21 +880,40 @@ def main():
                 with preview_col3:
                     st.metric("ID (slug)", selected.get("id", "N/A"))
                 
-                st.caption("Click a button below to load this project into the desired tab with full data.")
+                # Inline previews for both workflows
+                st.subheader("Quick Preview (before switching tabs)")
+                col_preview1, col_preview2 = st.columns(2)
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("📊 Analyze this project (valuation + hiring)", type="primary"):
+                # Quick Analyze preview
+                with col_preview1:
+                    st.markdown("**📊 Analyze Preview**")
+                    quick_details = fetch_coin_details(selected["id"])
+                    if quick_details:
+                        mc = quick_details.get("market_data", {}).get("market_cap_usd")
+                        vol = quick_details.get("market_data", {}).get("total_volume_usd")
+                        tw = quick_details.get("community_data", {}).get("twitter_followers")
+                        st.metric("Market Cap", format_usd(mc))
+                        st.metric("24h Volume", format_usd(vol))
+                        st.metric("Twitter Followers", f"{tw:,}" if tw else "N/A")
+                    else:
+                        st.caption("Quick metrics loading...")
+                    if st.button("→ Full Analysis in Analyze Tab", type="primary", key="quick_analyze"):
                         st.session_state.current_project = selected["id"]
                         st.session_state.current_project_name = selected["name"]
                         st.session_state.requested_tab = "analyze"
                         st.rerun()
-                with col2:
-                    if st.button("📈 Demo this project in Growth Intelligence Platform", type="secondary"):
+                
+                # Quick Platform preview
+                with col_preview2:
+                    st.markdown("**📈 Platform Demo Preview**")
+                    st.caption("KOL Analytics ready + On-chain signals available for this project")
+                    if st.button("→ Full Demo in Growth Intelligence Tab", type="secondary", key="quick_demo"):
                         st.session_state.current_project = selected["id"]
                         st.session_state.current_project_name = selected["name"]
                         st.session_state.requested_tab = "growth_intel"
                         st.rerun()
+                
+                st.caption("The quick previews load key data instantly. Click buttons above for full views.")
         
         st.divider()
         st.markdown("**Pro tip:** Very early projects (pre-TGE) often won't appear on CoinGecko. Use the **Growth Intelligence Platform** tab + X research links for those, or add them manually in Pitch Builder.")
