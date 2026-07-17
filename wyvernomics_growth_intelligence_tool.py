@@ -336,7 +336,7 @@ def search_coins(query: str) -> List[Dict]:
         st.error(f"CoinGecko search failed: {e}. Please try again in a moment (rate limits).")
         return []
 
-@st.cache_data(ttl=600, show_spinner="Loading project details from CoinGecko...")
+@st.cache_data(ttl=900, show_spinner="Loading project details from CoinGecko...")
 def fetch_coin_details(coin_id: str) -> Optional[Dict]:
     if not coin_id:
         return None
@@ -397,8 +397,10 @@ def fetch_coin_details(coin_id: str) -> Optional[Dict]:
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 404:
             st.warning(f"Project '{coin_id}' not found on CoinGecko. It may be very early-stage (pre-TGE).")
+        elif e.response.status_code == 429:
+            st.error("CoinGecko rate limit reached (429). Wait 30-60 seconds and try again.")
         else:
-            st.error(f"CoinGecko API error: {e}. Try again later (rate limit).")
+            st.error(f"CoinGecko API error: {e}. Try again later.")
         return None
     except Exception as e:
         st.error(f"Failed to fetch project details: {e}")
